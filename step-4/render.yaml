@@ -24,7 +24,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://familytask-backend.onrender.com
+        value: https://familytask-backend-iqk0.onrender.com
     routes:
       - type: rewrite
         source: /*
