@@ -3,6 +3,7 @@ import os
 import random
 import secrets
 from typing import Optional
+from datetime import datetime
 
 import httpx
 from fastapi import FastAPI, Depends, Header, HTTPException, Body
@@ -19,6 +20,7 @@ class Task(SQLModel, table=True):
     title: str
     done: bool = False
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")
+    completed_at: Optional[datetime] = Field(default=None, nullable=True)
 
 
 class Lien(SQLModel, table=True):
@@ -319,8 +321,78 @@ async def assistant(message: str = Body(..., embed=False), me: Member = Depends(
 
 
 @app.get("/api/tasks")
-def list_tasks(me: Member = Depends(current_member), session: Session = Depends(get_session)):
-    return session.exec(select(Task).where(Task.member_id == me.id)).all()
+def list_tasks(member_id: Optional[int] = None, me: Member = Depends(current_member), session: Session = Depends(get_session)):
+    # If no member_id provided, return the tasks for the current member
+    if member_id is None:
+        return session.exec(select(Task).where(Task.member_id == me.id)).all()
+
+    # If asking for own tasks, allow
+    if member_id == me.id:
+        return session.exec(select(Task).where(Task.member_id == me.id)).all()
+
+    # Otherwise only admin can request another member's tasks
+    if not me.is_admin:
+        raise HTTPException(status_code=403, detail="Seul l'admin peut voir les tâches des autres membres")
+
+    assigned_member = session.get(Member, member_id)
+    if not assigned_member or assigned_member.family_code != me.family_code:
+        raise HTTPException(status_code=400, detail="Membre invalide pour cette famille")
+
+    return session.exec(select(Task).where(Task.member_id == member_id)).all()
+
+
+@app.patch("/api/tasks/{task_id}")
+def update_task(task_id: int, done: Optional[bool] = None, title: Optional[str] = None,
+                me: Member = Depends(current_member), session: Session = Depends(get_session)):
+    task = session.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tâche introuvable")
+
+    task_owner = session.get(Member, task.member_id)
+    if not task_owner or task_owner.family_code != me.family_code:
+        raise HTTPException(status_code=403, detail="Tâche hors de ta famille")
+
+    if task_owner.id != me.id and not me.is_admin:
+        raise HTTPException(status_code=403, detail="Tu ne peux modifier que tes propres tâches")
+
+    updated = False
+    if done is not None:
+        task.done = bool(done)
+        if task.done:
+            task.completed_at = datetime.utcnow()
+        else:
+            task.completed_at = None
+        updated = True
+    if title is not None:
+        title = title.strip()
+        if title:
+            task.title = title
+            updated = True
+
+    if updated:
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+
+    return task
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: int, me: Member = Depends(current_member), session: Session = Depends(get_session)):
+    task = session.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tâche introuvable")
+
+    task_owner = session.get(Member, task.member_id)
+    if not task_owner or task_owner.family_code != me.family_code:
+        raise HTTPException(status_code=403, detail="Tâche hors de ta famille")
+
+    if task_owner.id != me.id and not me.is_admin:
+        raise HTTPException(status_code=403, detail="Tu ne peux supprimer que tes propres tâches")
+
+    session.delete(task)
+    session.commit()
+    return {"ok": True}
 
 
 @app.get("/api/tasks/famille")
