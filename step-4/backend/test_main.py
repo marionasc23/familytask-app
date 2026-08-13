@@ -73,3 +73,89 @@ def test_task_created_by_member_is_visible_in_tasks(client):
     assert len(tasks) == 1
     assert tasks[0]["title"] == "Faire les courses"
     assert tasks[0]["member_id"] == user["id"]
+
+
+def test_admin_can_assign_task_to_other_member(client):
+    admin = create_member_and_login(client, email="admin@example.com", name="Admin")
+    admin_token = admin["token"]
+
+    # create another member in the same family via admin
+    resp = client.post(
+        "/api/members",
+        params={
+            "email": "bob@example.com",
+            "password": "secret123",
+            "name": "Bob",
+            "lien": "fils",
+            "is_admin": False,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    member = resp.json()
+
+    # admin assigns a task to Bob
+    create_resp = client.post(
+        "/api/tasks",
+        params={"title": "Tâche pour Bob", "member_id": member["id"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert create_resp.status_code == 200, create_resp.text
+    task = create_resp.json()
+    assert task["member_id"] == member["id"]
+
+    # Bob's tasks should include it (admin can query by member_id)
+    tasks_resp = client.get(
+        "/api/tasks",
+        params={"member_id": member["id"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert tasks_resp.status_code == 200, tasks_resp.text
+    tasks = tasks_resp.json()
+    assert any(t["title"] == "Tâche pour Bob" for t in tasks)
+
+
+def test_non_admin_cannot_assign_to_other(client):
+    admin = create_member_and_login(client, email="admin2@example.com", name="Admin2")
+    admin_token = admin["token"]
+
+    # create a non-admin member
+    resp = client.post(
+        "/api/members",
+        params={
+            "email": "charlie@example.com",
+            "password": "secret123",
+            "name": "Charlie",
+            "lien": "fils",
+            "is_admin": False,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    member = resp.json()
+
+    # login as Charlie
+    login = client.post(
+        "/api/login",
+        params={"email": "charlie@example.com", "password": "secret123"},
+    )
+    assert login.status_code == 200, login.text
+    charlie = login.json()
+
+    # Charlie tries to create a task for admin (not allowed)
+    bad = client.post(
+        "/api/tasks",
+        params={"title": "Tâche mauvaise", "member_id": admin["id"]},
+        headers={"Authorization": f"Bearer {charlie['token']}"},
+    )
+    assert bad.status_code == 403
+
+    # But Charlie can create a task for himself
+    ok = client.post(
+        "/api/tasks",
+        params={"title": "Tâche perso"},
+        headers={"Authorization": f"Bearer {charlie['token']}"},
+    )
+    assert ok.status_code == 200, ok.text
+    task = ok.json()
+    assert task["member_id"] == charlie["id"]

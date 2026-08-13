@@ -4,6 +4,7 @@ import random
 import secrets
 from typing import Optional
 from datetime import datetime
+import logging
 
 import httpx
 from fastapi import FastAPI, Depends, Header, HTTPException, Body
@@ -60,8 +61,6 @@ def public_member(member: Member) -> dict:
         "family_code": member.family_code,
         "family_name": member.family_name,
     }
-
-
 def pluralize_relation(label: str) -> str:
     rel = (label or "").strip().lower()
     if not rel:
@@ -121,6 +120,8 @@ def current_member(authorization: Optional[str] = Header(default=None), session:
 
 app = FastAPI(title="FamilyTask")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+logging.basicConfig(level=logging.INFO)
 
 
 @app.on_event("startup")
@@ -292,6 +293,7 @@ async def assistant(message: str = Body(..., embed=False), me: Member = Depends(
             session.add(task)
             session.commit()
             session.refresh(task)
+            logging.info(f"assistant: created task id={task.id} title={task.title!r} member_id={task.member_id} by={me.email}")
             created_tasks.append({
                 "id": task.id,
                 "title": task.title,
@@ -488,6 +490,7 @@ def add_task(title: str, member_id: Optional[int] = None, me: Member = Depends(c
     session.add(task)
     session.commit()
     session.refresh(task)
+    logging.info(f"api: created task id={task.id} title={task.title!r} member_id={task.member_id} by={me.email}")
     return task
 
 

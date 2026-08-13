@@ -8,17 +8,30 @@ const tasks = ref([])
 const members = ref([])
 const newTitle = ref('')
 const assignTo = ref(null)
-const filterMember = ref(null)
 const isAdmin = computed(() => me && me.is_admin)
+// default filter: admins see the whole family, non-admins see their own tasks
+const filterMember = ref(isAdmin.value ? 'family' : 'me')
 
 async function refresh() {
   // load members for select
   members.value = await (await fetch(`${API}/api/members`, { headers: authHeaders() })).json()
 
-  // build tasks URL with optional member filter
+  // load tasks depending on filter and role
+  if (isAdmin.value && filterMember.value === 'family') {
+    tasks.value = await (await fetch(`${API}/api/tasks/famille`, { headers: authHeaders() })).json()
+    return
+  }
+
   const q = new URLSearchParams()
-  if (filterMember.value) q.append('member_id', filterMember.value)
-  // default: member_id not provided -> current member tasks
+  // only append member_id when a specific member (not 'me' or 'family') is selected
+  if (
+    filterMember.value &&
+    filterMember.value !== 'me' &&
+    filterMember.value !== 'family'
+  ) {
+    q.append('member_id', String(filterMember.value))
+  }
+  // if filterMember is 'me' or undefined, call /api/tasks (server uses token to return current member tasks)
   const url = `${API}/api/tasks${q.toString() ? ('?' + q.toString()) : ''}`
   tasks.value = await (await fetch(url, { headers: authHeaders() })).json()
 }
@@ -27,7 +40,9 @@ async function addTask() {
   if (!newTitle.value.trim()) return
 
   const params = new URLSearchParams({ title: newTitle.value.trim() })
-  if (isAdmin.value && assignTo.value) params.append('member_id', assignTo.value)
+  // always include member_id explicitly to avoid ambiguity
+  const target = (isAdmin.value ? (assignTo.value || me.id) : me.id)
+  params.append('member_id', target)
 
   await fetch(`${API}/api/tasks?${params.toString()}`, { method: 'POST', headers: authHeaders() })
   newTitle.value = ''
@@ -50,8 +65,9 @@ async function remove(task) {
 }
 
 const currentTitle = computed(() => {
-  if (!filterMember.value) return 'Mes tâches'
-  const m = members.value.find(x => x.id === filterMember.value)
+  if (isAdmin.value && filterMember.value === 'family') return "Toutes les tâches de la famille"
+  if (filterMember.value === 'me') return 'Mes tâches'
+  const m = members.value.find(x => String(x.id) === String(filterMember.value))
   return m ? `Tâches de ${m.name}` : 'Tâches filtrées'
 })
 
@@ -68,12 +84,21 @@ onMounted(refresh)
         <button class="primary square" @click="addTask">＋</button>
       </div>
       <select v-if="isAdmin" v-model="assignTo" class="assign">
-        <option :value="null">Pour moi</option>
+        <option :value="me.id">Pour moi</option>
         <option v-for="m in members.filter(x => x.id !== me.id)" :key="m.id" :value="m.id">Pour {{ m.name }}</option>
       </select>
     </div>
 
     <div class="card">
+      <div class="row" style="margin-bottom:10px;">
+        <label style="margin-right:8px">Filtrer les tâches :</label>
+        <select v-model="filterMember">
+          <option v-if="isAdmin" value="family">Toutes la famille</option>
+          <option value="me">Mes tâches</option>
+          <option v-for="m in members" :key="m.id" :value="m.id">{{ m.name }}</option>
+        </select>
+        <button class="link" @click="refresh">Appliquer</button>
+      </div>
       <h3>{{ currentTitle }}</h3>
       <TaskList :tasks="tasks" :members="members" @toggle="toggle" @remove="remove" />
     </div>

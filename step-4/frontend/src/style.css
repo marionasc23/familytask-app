@@ -577,3 +577,16 @@ button {
   color: var(--primary-strong);
   background: var(--primary-soft);
 }
+.card .row select {
+  flex: 1;
+  min-width: 0;
+}
+.card .row .link {
+  background: var(--surface-2);
+  color: var(--primary-strong);
+  font-weight: 800;
+  padding: 10px 14px;
+  border-radius: 12px;
+  flex: none;
+  white-space: nowrap;
+}
